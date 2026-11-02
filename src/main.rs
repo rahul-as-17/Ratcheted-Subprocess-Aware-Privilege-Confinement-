@@ -13,7 +13,6 @@ pub struct AgentPolicy {
 }
 
 fn main() {
-    // Added system directories required to execute binaries
     let json_policy = r#"{
         "allowed_paths": [
             "/tmp/agent_workspace",
@@ -42,8 +41,8 @@ fn main() {
     println!("Worker will attempt to list both /tmp/agent_workspace (Allowed) and /etc (Blocked)...\n");
 
     let mut cmd = Command::new(&policy.allowed_binaries[0]);
-    cmd.arg("/tmp/agent_workspace"); // Allowed path
-    cmd.arg("/etc");                 // Blocked path
+    cmd.arg("/tmp/agent_workspace"); 
+    cmd.arg("/etc");                 
 
     let mut ruleset_opt = Some(ruleset);
     
@@ -52,6 +51,26 @@ fn main() {
             if let Some(r) = ruleset_opt.take() {
                 r.restrict_self().expect("Failed to enforce Landlock on worker");
             }
+
+            let mut ctx = libseccomp::ScmpFilterContext::new(libseccomp::ScmpAction::KillProcess)
+                .expect("Failed to initialize seccomp context");
+
+            let allowed_syscalls = vec![
+                "execve", "read", "write", "exit_group", "brk", "mmap", "mprotect", "munmap", "close",
+                "getdents64", "openat", "fstat", "statx", "pread64", "rt_sigaction", "newfstatat",
+                "sigaltstack", "getrandom", "lseek", "prlimit64", "arch_prctl", "access", "fcntl",
+                "rseq", "sched_getaffinity", "set_robust_list", "gettid", "set_tid_address", "prctl",
+                "poll", "ioctl", "statfs"
+            ];
+
+            for syscall_name in allowed_syscalls {
+                let syscall = libseccomp::ScmpSyscall::from_name(syscall_name).unwrap();
+                ctx.add_rule(libseccomp::ScmpAction::Allow, syscall)
+                    .expect("Failed to add seccomp rule");
+            }
+
+            ctx.load().expect("Failed to load seccomp filter");
+
             Ok(())
         });
     }
